@@ -583,7 +583,7 @@ handle_request({<<"MAIL">>, Args},
 									?log(debug, "error: ~s~n", [Message]),
 									safe_send(Message, State);
 								NewState ->
-									?LOG_DEBUG("OK", []),
+									?LOG_DEBUG("OK"),
 									case Module:handle_MAIL(ParsedAddress, State#state.callbackstate) of
 										{ok, CallbackState} ->
 											safe_send("250 sender Ok\r\n",
@@ -700,7 +700,7 @@ handle_request({<<"STARTTLS">>, <<>>}, #state{socket = Socket, module = Module, 
 			{ok, [{active, false}]} = inet:getopts(Socket, [active]),
 			case ranch_ssl:handshake(Socket, [{packet, line}, {mode, binary}, {ssl_imp, new} | TlsOpts2], 5000) of %XXX: see smtp_socket:?SSL_LISTEN_OPTIONS
 				{ok, NewSocket} ->
-					?LOG_DEBUG("SSL negotiation sucessful", []),
+					?LOG_DEBUG("SSL negotiation sucessful"),
 					ranch_ssl:setopts(NewSocket, [{packet, line}]),
 					{ok, State#state{socket = NewSocket, transport = ranch_ssl, envelope=undefined,
 							authdata=undefined, waitingauth=false, readmessage=false,
