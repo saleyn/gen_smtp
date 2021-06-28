@@ -706,7 +706,7 @@ handle_request({<<"STARTTLS">>, <<>>}, #state{socket = Socket, module = Module, 
 							authdata=undefined, waitingauth=false, readmessage=false,
 							tls=true, callbackstate = Module:handle_STARTTLS(OldCallbackState)}};
 				{error, Reason} ->
-					?log(info, "SSL handshake failed : ~p~n", [Reason]),
+					?LOG_INFO("SSL handshake failed : ~p", [Reason]),
 					reply_and_handle_error(State, "454 TLS negotiation failed\r\n", ssl_handshake_error, Reason)
 			end;
 		false ->
