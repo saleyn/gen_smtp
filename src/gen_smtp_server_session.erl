@@ -581,7 +581,7 @@ handle_request({<<"MAIL">>, Args},
 							end,
 							case lists:foldl(F, State, Options) of
 								{error, Message} ->
-									?log(debug, "error: ~s~n", [Message]),
+									?LOG_DEBUG("Error: ~s", [Message]),
 									safe_send(Message, State);
 								NewState ->
 									?LOG_DEBUG("OK"),
@@ -627,7 +627,7 @@ handle_request({<<"RCPT">>, Args}, #state{envelope = Envelope, module = Module, 
 					end;
 				{ParsedAddress, ExtraInfo} ->
 					% TODO - are there even any RCPT extensions?
-					?log(debug, "To address ~s (parsed as ~s) with extra info ~s~n", [Address, ParsedAddress, ExtraInfo]),
+					?LOG_DEBUG("To address ~s (parsed as ~s) with extra info ~s", [Address, ParsedAddress, ExtraInfo]),
 					safe_send(["555 Unsupported option: ", ExtraInfo, "\r\n"], State)
 			end;
 		_Else ->
@@ -650,7 +650,7 @@ handle_request({<<"DATA">> = C, <<>>}, #state{envelope = Envelope} = State) ->
 		_Else ->
 			send_and_run("354 enter mail, end with line containing only '.'\r\n",
 									 fun(S) ->
-										 ?log(debug, "switching to data read mode~n", []),
+										 ?LOG_DEBUG("switching to data read mode"),
 										 {ok, S#state{readmessage = true}}
 									 end,
 									 State)
@@ -680,36 +680,38 @@ handle_request({<<"VRFY">>, Address}, #state{module= Module, callbackstate = Old
 	end;
 handle_request({<<"STARTTLS">>, <<>>}, #state{socket = Socket, module = Module, tls=false,
 											  extensions = Extensions, callbackstate = OldCallbackState,
-											  options = Options} = State) ->
+											  options = Options} = State0) ->
 	case has_extension(Extensions, "STARTTLS") of
 		{true, _} ->
-			send(State, "220 OK\r\n"),
-			TlsOpts0 = proplists:get_value(tls_options, Options, []),
-			TlsOpts1 = case proplists:get_value(certfile, Options) of
-				undefined ->
-					TlsOpts0;
-				CertFile ->
-					[{certfile, CertFile} | TlsOpts0]
+			F = fun(State) ->
+				TlsOpts0 = proplists:get_value(tls_options, Options, []),
+				TlsOpts1 = case proplists:get_value(certfile, Options) of
+					undefined ->
+						TlsOpts0;
+					CertFile ->
+						[{certfile, CertFile} | TlsOpts0]
+				end,
+				TlsOpts2 = case proplists:get_value(keyfile, Options) of
+					undefined ->
+						TlsOpts1;
+					KeyFile ->
+						[{keyfile, KeyFile} | TlsOpts1]
+				end,
+				%% Assert that socket is in passive state
+				{ok, [{active, false}]} = inet:getopts(Socket, [active]),
+				case ranch_ssl:handshake(Socket, [{packet, line}, {mode, binary}, {ssl_imp, new} | TlsOpts2], 5000) of %XXX: see smtp_socket:?SSL_LISTEN_OPTIONS
+					{ok, NewSocket} ->
+						?LOG_DEBUG("SSL negotiation sucessful"),
+						ranch_ssl:setopts(NewSocket, [{packet, line}]),
+						{ok, State#state{socket = NewSocket, transport = ranch_ssl, envelope=undefined,
+								authdata=undefined, waitingauth=false, readmessage=false,
+								tls=true, callbackstate = Module:handle_STARTTLS(OldCallbackState)}};
+					{error, Reason} ->
+						?LOG_INFO("SSL handshake failed : ~p", [Reason]),
+						reply_and_handle_error(State, "454 TLS negotiation failed\r\n", ssl_handshake_error, Reason)
+				end
 			end,
-			TlsOpts2 = case proplists:get_value(keyfile, Options) of
-				undefined ->
-					TlsOpts1;
-				KeyFile ->
-					[{keyfile, KeyFile} | TlsOpts1]
-			end,
-			%% Assert that socket is in passive state
-			{ok, [{active, false}]} = inet:getopts(Socket, [active]),
-			case ranch_ssl:handshake(Socket, [{packet, line}, {mode, binary}, {ssl_imp, new} | TlsOpts2], 5000) of %XXX: see smtp_socket:?SSL_LISTEN_OPTIONS
-				{ok, NewSocket} ->
-					?LOG_DEBUG("SSL negotiation sucessful"),
-					ranch_ssl:setopts(NewSocket, [{packet, line}]),
-					{ok, State#state{socket = NewSocket, transport = ranch_ssl, envelope=undefined,
-							authdata=undefined, waitingauth=false, readmessage=false,
-							tls=true, callbackstate = Module:handle_STARTTLS(OldCallbackState)}};
-				{error, Reason} ->
-					?LOG_INFO("SSL handshake failed : ~p", [Reason]),
-					reply_and_handle_error(State, "454 TLS negotiation failed\r\n", ssl_handshake_error, Reason)
-			end;
+			send_and_run("220 OK\r\n", F, State0);
 		false ->
 			safe_send("500 Command unrecognized\r\n", State0)
 	end;
@@ -816,13 +818,13 @@ try_auth(AuthType, Username, Credential, #state{module = Module, envelope = Enve
 			case Module:handle_AUTH(AuthType, Username, Credential, OldCallbackState) of
 				{ok, CallbackState} ->
 					safe_send("235 Authentication successful.\r\n",
-					{ok, NewState#state{callbackstate = CallbackState,
-					                    envelope = Envelope#envelope{auth = {Username, Credential}}}};
+										NewState#state{callbackstate = CallbackState,
+																	 envelope = Envelope#envelope{auth = {Username, Credential}}});
 				_Other ->
 					safe_send("535 Authentication failed.\r\n", NewState)
 			end;
 		false ->
-			?log(warning, "Please define handle_AUTH/4 in your server module or remove AUTH from your module extensions~n"),
+			?LOG_WARNING("Please define handle_AUTH/4 in your server module or remove AUTH from your module extensions"),
 			safe_send("535 authentication failed (#5.7.1)\r\n", NewState)
 	end.
 
