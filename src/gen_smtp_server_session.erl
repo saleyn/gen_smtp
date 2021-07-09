@@ -359,9 +359,6 @@ parse_request(Packet) when is_binary(Packet) ->
 			{binstr:to_upper(Verb), Parameters}
 	end.
 
-ok_state(State) ->
-	{ok, State}.
-
 -spec handle_request({Verb :: binary(), Args :: binary()}, State :: #state{}) -> {'ok', #state{}} | {'stop', any(), #state{}}.
 handle_request({<<>>, _Any}, State) ->
 	safe_send("500 Error: bad syntax\r\n", State);
@@ -964,6 +961,9 @@ check_bare_crlf(Binary, _Prev, Op, Offset) ->
 			end
 	end.
 
+ok_state(State) ->
+	{ok, State}.
+
 -spec safe_send(Msg::list(), #state{}) -> {ok, #state{}}.
 safe_send(Msg, #state{} = State) when is_list(Msg) ->
   send_and_run(Msg, fun ok_state/1, State).
@@ -982,36 +982,37 @@ send_and_run(Msg, Fun, State) when is_list(Msg), is_function(Fun, 1) ->
 	case reply_and_handle_error(State, Msg, send_error, closed) of
   {ok, State1} ->
   	try Fun(State1) of
-			{ok, State2} ->
-				{ok, State2};
-			{ok, State2, Timeout} ->
-				{ok, State2, Timeout};
-			{noreply, State2, Timeout} ->
-				{noreply, State2, Timeout};
-			{noreply, State2} ->
-				{noreply, State2, ?TIMEOUT};
-			{stop, Reason, State2} ->
-				{stop, Reason, State2}
+			{ok,      _State}           = R -> R;
+			{ok,      _State, _Timeout} = R -> R;
+			{stop,    _Reason,  _State} = R -> R;
+			{noreply, _State, _Timeout} = R -> R;
+			{noreply, State2}               -> {noreply, State2, ?TIMEOUT}
 		catch
-			throw:{stop, Why, State3} ->
-				{stop, Why, State3};
-			throw:Other ->
-				throw(Other);
-			error:Other ->
-				throw(Other)
+			throw:{stop, Why, State3}       -> {stop, Why, State3};
+			throw:Other                     -> throw(Other);
+			error:Other                     -> erlang:error(Other)
   	end;
-  {stop, normal, _State} = StopResult ->
+  {stop, _Why, _State} = StopResult   ->
   	StopResult
 	end.
 
 reply_and_handle_error(State, Reply, ErrType, Reason) when is_atom(ErrType) ->
-	case send(State, Reply) of
-		ok ->
-			State1 = handle_error(ErrType, Reason, State),
-			{ok, State1};
-		{error, closed} ->
-			State1 = handle_error(ErrType, Reason, State),
-			{stop, normal, State1}
+	Result = send(State, Reply),
+	try
+		State1 = handle_error(ErrType, Reason, State),
+		case Result of
+			ok ->
+				{ok, State1};
+			{error, closed} ->
+				{stop, normal, State1}
+		end
+	catch
+		throw:{stop, _Why, _State} = R ->
+			R;
+		throw:Other ->
+			throw(Other);
+		error:Other ->
+			erlang:error(Other)
 	end.
 
 send(#state{transport = Transport, socket = Sock} = St, Data) ->
@@ -1021,6 +1022,7 @@ send(#state{transport = Transport, socket = Sock} = St, Data) ->
 		{error, closed} ->
 			{error, closed};
 		{error, Err} ->
+			?LOG_DEBUG(#{info => "Error sending data", data => Data, error => Err}),
 			St1 = handle_error(send_error, Err, St),
 			Transport:close(Sock),
 			throw({stop, {send_error, Err}, St1})
