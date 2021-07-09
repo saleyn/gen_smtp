@@ -982,30 +982,30 @@ send_and_run(Msg, Fun, State) when is_list(Msg), is_function(Fun, 1) ->
 	case reply_and_handle_error(State, Msg, send_error, closed) of
   {ok, State1} ->
   	try Fun(State1) of
-    {ok, State2} ->
-    	{ok, State2};
-    {ok, State2, Timeout} ->
-    	{ok, State2, Timeout};
-    {noreply, State2, Timeout} ->
-          {noreply, State2, Timeout};
-    {noreply, State2} ->
-          {noreply, State2, ?TIMEOUT};
-    {stop, Reason, State2} ->
-    	{stop, Reason, State2}
-  	catch
-    throw:{stop, Why, State3} ->
-          {stop, Why, State3};
-    throw:Other ->
-          throw(Other);
-    error:Other ->
-          throw(Other)
+			{ok, State2} ->
+				{ok, State2};
+			{ok, State2, Timeout} ->
+				{ok, State2, Timeout};
+			{noreply, State2, Timeout} ->
+				{noreply, State2, Timeout};
+			{noreply, State2} ->
+				{noreply, State2, ?TIMEOUT};
+			{stop, Reason, State2} ->
+				{stop, Reason, State2}
+		catch
+			throw:{stop, Why, State3} ->
+				{stop, Why, State3};
+			throw:Other ->
+				throw(Other);
+			error:Other ->
+				throw(Other)
   	end;
   {stop, normal, _State} = StopResult ->
   	StopResult
 	end.
 
 reply_and_handle_error(State, Reply, ErrType, Reason) when is_atom(ErrType) ->
-	case send(State, Reply, true) of
+	case send(State, Reply) of
 		ok ->
 			State1 = handle_error(ErrType, Reason, State),
 			{ok, State1};
@@ -1014,15 +1014,15 @@ reply_and_handle_error(State, Reply, ErrType, Reason) when is_atom(ErrType) ->
 			{stop, normal, State1}
 	end.
 
-send(#state{transport = Transport, socket = Sock} = St, Data, IgnoreSockClosedError) ->
+send(#state{transport = Transport, socket = Sock} = St, Data) ->
 	case Transport:send(Sock, Data) of
 		ok ->
 			ok;
-		{error, closed} when IgnoreSockClosedError ->
+		{error, closed} ->
 			{error, closed};
 		{error, Err} ->
 			St1 = handle_error(send_error, Err, St),
-				Transport:close(Sock),
+			Transport:close(Sock),
 			throw({stop, {send_error, Err}, St1})
 	end.
 
