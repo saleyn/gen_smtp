@@ -345,12 +345,13 @@ parse_request(Packet) when is_binary(Packet) ->
 	Request = binstr:strip(binstr:strip(binstr:strip(binstr:strip(Packet, right, $\n), right, $\r), right, $\s), left, $\s),
 	case binstr:strchr(Request, $\s) of
 		0 ->
-		    ?LOG_DEBUG("got a ~s request", [Request]),
 			case binstr:to_upper(Request) of
 				<<"QUIT">> = Res -> {Res, <<>>};
 				<<"DATA">> = Res -> {Res, <<>>};
 				% likely a base64-encoded client reply
-				_ -> {Request, <<>>}
+				_ ->
+					?LOG_DEBUG("got a ~s request", [base64:decode(Request)]),
+					{Request, <<>>}
 			end;
 		Index ->
 			Verb = binstr:substr(Request, 1, Index - 1),
